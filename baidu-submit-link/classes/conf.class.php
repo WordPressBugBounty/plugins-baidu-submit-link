@@ -394,7 +394,7 @@ class WB_BSL_Conf extends WB_BSL_Base
                 break;
             }
 
-            $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/update',array('sslverify'=>false,'body'=>$param,'headers'=>array('referer'=>home_url()),));
+            $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/update',array('sslverify'=>self::sslverify(),'timeout'=>15,'body'=>$param,'headers'=>array('referer'=>home_url()),));
             if(is_wp_error($http)){
                 $err = '升级异常，请稍后再试。[1000]['.$http->get_error_message().']';
                 break;

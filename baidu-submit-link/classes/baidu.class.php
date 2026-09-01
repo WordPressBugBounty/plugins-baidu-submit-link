@@ -35,7 +35,7 @@ class WB_BSL_Baidu extends WB_BSL_Base
             'timeout' => 3,
             'redirection' => 3,
             'user-agent' => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36',
-            'sslverify' => FALSE,
+            'sslverify' => true,
         );
         $search_url2 = null;
 
@@ -124,7 +124,7 @@ class WB_BSL_Baidu extends WB_BSL_Base
                 'headers'=>array('referer'=>home_url()),
                 'timeout'   => 3,
                 'user-agent' => 'WB-API-BSL-'.BSL_VERSION,
-                'sslverify' => false,
+                'sslverify' => true,
             );
 
             $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/bsl2',$arg);
@@ -171,7 +171,7 @@ class WB_BSL_Baidu extends WB_BSL_Base
             'timeout' => 3,
             'redirection' => 3,
             'user-agent' => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36',
-            'sslverify' => FALSE,
+            'sslverify' => true,
         );
         $search_url2 = null;
 
@@ -288,10 +288,12 @@ class WB_BSL_Baidu extends WB_BSL_Base
         }else{
             $api = $apis[$type].'?site='.$site.'&token='.$token;
         }
+        // ✅ 增强安全性：添加SSL验证和更长的超时
         $args = array(
-            'timeout'=>10,
-            'method'=>'POST',
-            'body'=>implode("\n",$urls)
+            'timeout' => 30,
+            'method' => 'POST',
+            'body' => implode("\n",$urls),
+            'sslverify' => true,
         );
         $http = wp_remote_post($api,$args);
         if(is_wp_error($http)){
@@ -362,10 +364,12 @@ class WB_BSL_Baidu extends WB_BSL_Base
             return $ret;
         }
 
+        // ✅ 增强安全性：添加SSL验证和更长的超时
         $args = array(
-            'timeout'=>10,
-            'method'=>'POST',
-            'body'=>implode("\n",$urls)
+            'timeout' => 30,
+            'method' => 'POST',
+            'body' => implode("\n",$urls),
+            'sslverify' => true,
         );
 
         //self::log(wp_json_encode($args));
@@ -468,10 +472,12 @@ class WB_BSL_Baidu extends WB_BSL_Base
         //self::log($api);
 
 
+        // ✅ 增强安全性：添加SSL验证和更长的超时
         $args = array(
-            'timeout'=>10,
-            'method'=>'POST',
-            'body'=>implode("\n",$urls)
+            'timeout' => 30,
+            'method' => 'POST',
+            'body' => implode("\n",$urls),
+            'sslverify' => true,
         );
 
         //self::log(wp_json_encode($args));

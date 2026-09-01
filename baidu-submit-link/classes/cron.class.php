@@ -17,6 +17,10 @@ class WB_BSL_Cron extends WB_BSL_Base
         add_action('baidu_push_url_cron_action_v3',array(__CLASS__,'baidu_push_url_cron_action_v3'));
         add_action('baidu_push_url_cron_action_v4',array(__CLASS__,'baidu_push_url_cron_action_v4'));
 
+    }
+
+    public static function ensure_scheduled()
+    {
         if(!wp_next_scheduled('baidu_push_url_cron_action_v4')){
             wp_schedule_event(strtotime(current_time('Y-m-d H:i:00',1)), 'five_minute', 'baidu_push_url_cron_action_v4');
         }
@@ -26,17 +30,19 @@ class WB_BSL_Cron extends WB_BSL_Base
     }
 
 
-    public static function cron_schedules(){
-        return array(
-            'five_minute'=>array(
-                'interval'=>MINUTE_IN_SECONDS * 5,
-                'display'=>'per five minute'
-            ),
-            'ten_minute'=>array(
-                'interval'=>MINUTE_IN_SECONDS * 10,
-                'display'=>'per ten minute'
-            )
+    public static function cron_schedules($schedules){
+        if (!is_array($schedules)) {
+            $schedules = array();
+        }
+        $schedules['five_minute'] = array(
+            'interval' => MINUTE_IN_SECONDS * 5,
+            'display' => 'per five minute'
         );
+        $schedules['ten_minute'] = array(
+            'interval' => MINUTE_IN_SECONDS * 10,
+            'display' => 'per ten minute'
+        );
+        return $schedules;
     }
 
     public static function bsl_single_push_url($post_id)
@@ -90,11 +96,10 @@ class WB_BSL_Cron extends WB_BSL_Base
         $db = self::db();
         $t = $db->prefix.'wb_bsl_log';
         $date = gmdate('Y-m-d H:i:s',strtotime(current_time('mysql')) - 600 );//86400
-        $sql = "SELECT * FROM $db->posts a WHERE a.post_status='publish' AND a.post_date>'$date'";
-        $sql .= " AND a.post_type NOT IN('nav_menu_item','attachment')";
-        //$sql .= " AND NOT EXISTS(SELECT b.id FROM $t b  WHERE b.post_id=a.ID)";
-        $sql .= " ORDER BY a.post_date DESC LIMIT 50";
-        //WB_BSL_Utils::run_log($sql,'定时任务');
+        $sql = $db->prepare(
+            "SELECT * FROM $db->posts a WHERE a.post_status='publish' AND a.post_date>%s AND a.post_type NOT IN('nav_menu_item','attachment') ORDER BY a.post_date DESC LIMIT 50",
+            $date
+        );
         $list = $db->get_results($sql);
         if($list)foreach($list as $r){
             do_action('wb_push_post', $r->ID, $r,true);
@@ -135,17 +140,11 @@ class WB_BSL_Cron extends WB_BSL_Base
 
 
 
-            $post_types = WB_BSL_Conf::cnf('post_type',array('post'));
-            if(empty($post_types))$post_types = array('post');
-
-            $post_types = "'".implode("','",$post_types)."'";
-
-
-            $sql = "SELECT b.*";
-            $sql .= " FROM $db->posts b WHERE b.post_type IN($post_types) AND b.post_status='publish' AND b.post_password='' ";
-            $sql .= ' ORDER BY b.post_date ASC LIMIT '.$offset.','.$num;
-
-
+            $types = self::post_type_in();
+            $sql = $db->prepare(
+                "SELECT b.* FROM $db->posts b WHERE b.post_type IN({$types['in']}) AND b.post_status='publish' AND b.post_password='' ORDER BY b.post_date ASC LIMIT %d,%d",
+                array_merge($types['values'], array(absint($offset), absint($num)))
+            );
             $list = $db->get_results($sql);
             if(!$list){
                 WB_BSL_Utils::run_log('查询文章0篇','收录查询');
@@ -170,7 +169,7 @@ class WB_BSL_Cron extends WB_BSL_Base
                     $arg = array(
                         'timeout'   => 1,
                         //'blocking'  => false,
-                        'sslverify' => false,
+                        'sslverify' => self::sslverify(),
                     );
                     $http = wp_remote_head($api,$arg);
 
@@ -214,7 +213,7 @@ class WB_BSL_Cron extends WB_BSL_Base
                 'headers'=>array('referer'=>home_url()),
                 'timeout'   => 0.1,
                 'blocking'  => false,
-                'sslverify' => false,
+                'sslverify' => self::sslverify(),
             );
 
             $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/bsl',$arg);
@@ -253,22 +252,12 @@ class WB_BSL_Cron extends WB_BSL_Base
             WB_BSL_Utils::run_log('新发布文章或未查询的存量文章','收录查询');
 
 
-            $post_types = WB_BSL_Conf::cnf('post_type',array('post'));
-            if(empty($post_types))$post_types = array('post');
-
-            $post_types = "'".implode("','",$post_types)."'";
-
-
-            $sql = "SELECT b.*";
-            $sql .= " FROM $db->posts b WHERE b.post_type IN($post_types) AND b.post_status='publish' AND b.post_password='' ";
-            $sql .= " AND NOT EXISTS(SELECT f.post_id FROM $db->postmeta f WHERE f.post_id=b.ID AND f.meta_key='url_in_baidu')
-             AND NOT EXISTS(SELECT j.post_id FROM $db->postmeta j WHERE j.post_id=b.ID AND j.meta_key='url_in_baidu_ymd')
-              GROUP BY b.ID LIMIT 1000";
-
-
+            $types = self::post_type_in();
+            $sql = $db->prepare(
+                "SELECT b.* FROM $db->posts b WHERE b.post_type IN({$types['in']}) AND b.post_status='publish' AND b.post_password='' AND NOT EXISTS(SELECT f.post_id FROM $db->postmeta f WHERE f.post_id=b.ID AND f.meta_key='url_in_baidu') AND NOT EXISTS(SELECT j.post_id FROM $db->postmeta j WHERE j.post_id=b.ID AND j.meta_key='url_in_baidu_ymd') GROUP BY b.ID LIMIT 1000",
+                $types['values']
+            );
             WB_BSL_Utils::txt_log('wb-query-'.$sql);
-
-            //echo $sql;exit();
             $list = $db->get_results($sql);
             WB_BSL_Utils::txt_log('wb-query-url-num'.count($list));
             if(!$list){
@@ -301,7 +290,7 @@ class WB_BSL_Cron extends WB_BSL_Base
                 'headers'=>array('referer'=>home_url()),
                 'timeout'   => 0.1,
                 'blocking'  => false,
-                'sslverify' => false,
+                'sslverify' => self::sslverify(),
             );
             $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/bsl',$arg);
             if(is_wp_error($http)){
@@ -328,16 +317,11 @@ class WB_BSL_Cron extends WB_BSL_Base
         $is_submit = 0;
         do{
             $ymd2 = gmdate('Y-m-d',current_time('timestamp') - 2 * 86400);
-            $post_types = WB_BSL_Conf::cnf('post_type',array('post'));
-            if(empty($post_types))$post_types = array('post');
-
-            $post_types = "'".implode("','",$post_types)."'";
-
-            $sql = "SELECT b.*";
-            $sql .= " FROM $db->posts b,$db->postmeta a WHERE b.ID=a.post_id AND  a.meta_key='url_in_baidu_ymd' AND b.post_type IN($post_types)  AND DATE_FORMAT(a.meta_value,'%Y-%m-%d') < '$ymd2'";
-            $sql .= " AND NOT EXISTS(SELECT f.post_id FROM $db->postmeta f WHERE f.post_id=b.ID AND f.meta_key='url_in_baidu')
-              GROUP BY b.ID LIMIT 1000";
-
+            $types = self::post_type_in();
+            $sql = $db->prepare(
+                "SELECT b.* FROM $db->posts b,$db->postmeta a WHERE b.ID=a.post_id AND a.meta_key='url_in_baidu_ymd' AND b.post_type IN({$types['in']}) AND DATE_FORMAT(a.meta_value,'%Y-%m-%d') < %s AND NOT EXISTS(SELECT f.post_id FROM $db->postmeta f WHERE f.post_id=b.ID AND f.meta_key='url_in_baidu') GROUP BY b.ID LIMIT 1000",
+                array_merge($types['values'], array($ymd2))
+            );
             $list = $db->get_results($sql);
 
             if(!$list){
@@ -366,7 +350,7 @@ class WB_BSL_Cron extends WB_BSL_Base
                 $arg = array(
                     'timeout'   => 1,
                     //'blocking'  => false,
-                    'sslverify' => false,
+                    'sslverify' => self::sslverify(),
                 );
                 $api = 'http://bsl.api.wbolt.com/baidu/data/'.substr($murl,0,2).'/'.substr($murl,2,2).'/'.$murl.'.txt';
 
@@ -410,17 +394,11 @@ class WB_BSL_Cron extends WB_BSL_Base
             WB_BSL_Utils::run_log('重新查询未收录文章','收录查询');
 
 
-            $post_types = WB_BSL_Conf::cnf('post_type',array('post'));
-            if(empty($post_types))$post_types = array('post');
-
-            $post_types = "'".implode("','",$post_types)."'";
-
-
-            $sql = "SELECT b.*";
-            $sql .= " FROM $db->posts b WHERE b.post_type IN($post_types) AND b.post_status='publish' AND b.post_password='' AND DATE_FORMAT(b.post_date,'%Y-%m-%d') > '$year_1' AND DATE_FORMAT(b.post_date,'%Y-%m-%d') < '$ymd7' ";
-            $sql .= " AND NOT EXISTS(SELECT f.post_id FROM $db->postmeta f WHERE f.post_id=b.ID AND f.meta_key='url_in_baidu' AND f.meta_value='1')
-             AND NOT EXISTS(SELECT j.post_id FROM $db->postmeta j WHERE j.post_id=b.ID AND j.meta_key='url_in_baidu_ymd' AND DATE_FORMAT(j.meta_value,'%Y-%m-%d') > '$ymd14')
-              GROUP BY b.ID LIMIT 1000";
+            $types = self::post_type_in();
+            $sql = $db->prepare(
+                "SELECT b.* FROM $db->posts b WHERE b.post_type IN({$types['in']}) AND b.post_status='publish' AND b.post_password='' AND DATE_FORMAT(b.post_date,'%Y-%m-%d') > %s AND DATE_FORMAT(b.post_date,'%Y-%m-%d') < %s AND NOT EXISTS(SELECT f.post_id FROM $db->postmeta f WHERE f.post_id=b.ID AND f.meta_key='url_in_baidu' AND f.meta_value='1') AND NOT EXISTS(SELECT j.post_id FROM $db->postmeta j WHERE j.post_id=b.ID AND j.meta_key='url_in_baidu_ymd' AND DATE_FORMAT(j.meta_value,'%Y-%m-%d') > %s) GROUP BY b.ID LIMIT 1000",
+                array_merge($types['values'], array($year_1, $ymd7, $ymd14))
+            );
 
 
             WB_BSL_Utils::txt_log('wb-query-'.$sql);
@@ -451,7 +429,7 @@ class WB_BSL_Cron extends WB_BSL_Base
                 $arg = array(
                     'timeout'   => 1,
                     //'blocking'  => false,
-                    'sslverify' => false,
+                    'sslverify' => self::sslverify(),
                 );
                 $api = 'http://bsl.api.wbolt.com/baidu/data/'.substr($murl,0,2).'/'.substr($murl,2,2).'/'.$murl.'.txt';
 
@@ -489,7 +467,7 @@ class WB_BSL_Cron extends WB_BSL_Base
         $t = $db->prefix.'wb_bsl_day';
 
         $ymd = current_time('Y-m-d');
-        $row = $db->get_row("SELECT * FROM $t WHERE ymd='$ymd' AND `type`=1");
+        $row = $db->get_row($db->prepare("SELECT * FROM $t WHERE ymd=%s AND `type`=1", $ymd));
 
         if($row){
             if($row->limited > 0 && isset($d['limited'])){
@@ -511,7 +489,7 @@ class WB_BSL_Cron extends WB_BSL_Base
         $db = self::db();
         $t = $db->prefix.'wb_bsl_day';
         $ymd = gmdate('Y-m-d',strtotime('-1 day'));
-        $row = $db->get_row("SELECT * FROM $t WHERE ymd='$ymd' AND `type`=1");
+        $row = $db->get_row($db->prepare("SELECT * FROM $t WHERE ymd=%s AND `type`=1", $ymd));
         return $row ? array('all_in'=>round($row->all_in * 0.6)) : array('all_in'=>-1);
 
     }
@@ -658,7 +636,7 @@ class WB_BSL_Cron extends WB_BSL_Base
                 'body'=>$body,
                 'headers'=>array('referer'=>home_url()),
                 'timeout'   => 5,
-                'sslverify' => false,
+                'sslverify' => self::sslverify(),
             );
 
             $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/bsl/idx',$arg);
@@ -700,10 +678,10 @@ class WB_BSL_Cron extends WB_BSL_Base
 
         $ymd = current_time('Y-m-d');
 
-        $num = $db->get_var("SELECT COUNT(1) FROM  $log WHERE DATE_FORMAT(create_date,'%Y-%m-%d') = '$ymd' AND `type` = 2 AND push_status=1 ");
+        $num = (int) $db->get_var($db->prepare("SELECT COUNT(1) FROM  $log WHERE DATE_FORMAT(create_date,'%Y-%m-%d') = %s AND `type` = 2 AND push_status=1 ", $ymd));
 
         if($num>0){
-            $db->query("UPDATE $t SET `limited` = `remain` + $num WHERE ymd='$ymd' AND `type`=1");
+            $db->query($db->prepare("UPDATE $t SET `limited` = `remain` + %d WHERE ymd=%s AND `type`=1", $num, $ymd));
         }
 
 
@@ -741,16 +719,13 @@ class WB_BSL_Cron extends WB_BSL_Base
         // global $wpdb;
 
         $db = self::db();
-        $post_types = WB_BSL_Conf::cnf('post_type',array('post'));
-        if(empty($post_types))$post_types = array('post');
-
-        $post_types = "'".implode("','",$post_types)."'";
+        $types = self::post_type_in();
 
         //收录
-        $num = $db->get_var("SELECT COUNT(DISTINCT a.ID) num FROM $db->posts a,$db->postmeta m WHERE a.ID=m.post_id AND m.meta_key='url_in_baidu' AND m.meta_value='1' AND a.post_type IN($post_types)");
+        $num = (int) $db->get_var($db->prepare("SELECT COUNT(DISTINCT a.ID) num FROM $db->posts a,$db->postmeta m WHERE a.ID=m.post_id AND m.meta_key='url_in_baidu' AND m.meta_value='1' AND a.post_type IN({$types['in']})", $types['values']));
 
         //文章
-        $post_num = $db->get_var("SELECT count(1) FROM $db->posts WHERE  post_type IN($post_types) AND post_status='publish'");
+        $post_num = (int) $db->get_var($db->prepare("SELECT count(1) FROM $db->posts WHERE  post_type IN({$types['in']}) AND post_status='publish'", $types['values']));
 
         $not_found = max(0,$post_num - $num);
 

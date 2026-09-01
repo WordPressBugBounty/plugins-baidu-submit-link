@@ -184,32 +184,29 @@ class WB_BSL_Stats extends WB_BSL_Base
 
 
     public static function baidu_log($type,$num=10,$offset=0){
-        // global $wpdb;
-
-        $post_types = WB_BSL_Conf::cnf('post_type',array('post'));
-        if(empty($post_types))$post_types = array('post');
-
-        $post_types = "'".implode("','",$post_types)."'";
-        $limit = $offset.','.$num;
-
+        $types = self::post_type_in();
+        $offset = absint($offset);
+        $num = max(1, absint($num));
         $db = self::db();
 
-
-
         if($type==1){
-            $sql = "SELECT SQL_CALC_FOUND_ROWS a.* FROM $db->posts a WHERE a.post_type IN($post_types) AND a.post_status=%s";
+            $where = "a.post_type IN({$types['in']}) AND a.post_status=%s";
+            $from = "$db->posts a";
         }else if($type==2){
-            $sql = "SELECT SQL_CALC_FOUND_ROWS a.* FROM $db->posts a,$db->postmeta b WHERE a.ID=b.post_id AND a.post_status=%s AND b.meta_key='url_in_baidu' AND b.meta_value='1' AND a.post_type IN($post_types)";
+            $where = "a.ID=b.post_id AND a.post_status=%s AND b.meta_key='url_in_baidu' AND b.meta_value='1' AND a.post_type IN({$types['in']})";
+            $from = "$db->posts a,$db->postmeta b";
         }else if($type==3){
-            $sql = "SELECT SQL_CALC_FOUND_ROWS a.* FROM $db->posts a WHERE a.post_type IN($post_types) AND a.post_status=%s";
-            $sql .= " AND NOT EXISTS(SELECT b.post_id FROM $db->postmeta b WHERE b.post_id = a.ID AND b.meta_key='url_in_baidu' AND b.meta_value='1' )";
+            $where = "a.post_type IN({$types['in']}) AND a.post_status=%s AND NOT EXISTS(SELECT b.post_id FROM $db->postmeta b WHERE b.post_id = a.ID AND b.meta_key='url_in_baidu' AND b.meta_value='1' )";
+            $from = "$db->posts a";
         }else{
             return array();
         }
 
-        //echo $sql;
-        $list =  $db->get_results($db->prepare("{$sql} ORDER BY a.post_date DESC LIMIT $limit",'publish'));
-        $total = $db->get_var("SELECT FOUND_ROWS()");
+        $params = array_merge($types['values'], array('publish'));
+        $sql = "SELECT a.* FROM {$from} WHERE {$where} ORDER BY a.post_date DESC LIMIT %d,%d";
+        $count_sql = "SELECT COUNT(*) FROM {$from} WHERE {$where}";
+        $list = $db->get_results($db->prepare($sql, array_merge($params, array($offset, $num))));
+        $total = (int) $db->get_var($db->prepare($count_sql, $params));
         $new_list = array();
         foreach($list as $r){
             $in_baidu = get_post_meta($r->ID,'url_in_baidu',true);
@@ -240,28 +237,35 @@ class WB_BSL_Stats extends WB_BSL_Base
         $from_timestamp = strtotime('-6 day',$timestamp);
         $from = gmdate('Y-m-d 00:00:00',$from_timestamp);
 
-        $limit = $offset.','.$num;
-        $where = '';
-        if($type == 100) {//all baidu
-            $where = "`type` IN(1,2,3) AND ";
-        }else if($type == 101) {//all bing
-            $where = "`type` IN(10,11) AND ";
-        }else if($type == 102) {//360,神马,头条
-            $where = "`type` IN(20,21,22,32,33) AND ";
-        }else if($type == 103) {//all google
-            $where = "`type` IN(30,31) AND ";
+        $offset = absint($offset);
+        $num = max(1, absint($num));
+        $type = absint($type);
+        $type_in = array();
+        if($type == 100) {
+            $type_in = array(1, 2, 3);
+        }else if($type == 101) {
+            $type_in = array(10, 11);
+        }else if($type == 102) {
+            $type_in = array(20, 21, 22, 32, 33);
+        }else if($type == 103) {
+            $type_in = array(30, 31);
         }else{
-            $where = "`type`=$type AND ";
+            $type_in = array($type);
         }
 
-        //,IF(`result` IS NULL,1,0) is_old
-        $query = "SELECT SQL_CALC_FOUND_ROWS id,post_id,create_date AS `date`,`post_url` AS `url`,push_status AS s_push,index_status AS s_record,`type` FROM $t WHERE ";
-        $query .= $db->prepare("{$where} create_date BETWEEN %s AND %s ORDER BY id DESC LIMIT $limit",$from, $now );
+        $in = implode(',', array_fill(0, count($type_in), '%d'));
+        $where = "`type` IN({$in}) AND create_date BETWEEN %s AND %s";
+        $params = array_merge($type_in, array($from, $now));
+        $query = $db->prepare(
+            "SELECT id,post_id,create_date AS `date`,`post_url` AS `url`,push_status AS s_push,index_status AS s_record,`type` FROM $t WHERE {$where} ORDER BY id DESC LIMIT %d,%d",
+            array_merge($params, array($offset, $num))
+        );
+        $count_query = $db->prepare("SELECT COUNT(*) FROM $t WHERE {$where}", $params);
 
         $new_list = array();
 
         $list =  $db->get_results($query);
-        $total = $db->get_var("SELECT FOUND_ROWS()");
+        $total = (int) $db->get_var($count_query);
         //$result = wp_json_encode(array('remain'=>0,'success'=>1));
         //foreach($list as $r){
 
@@ -558,7 +562,7 @@ class WB_BSL_Stats extends WB_BSL_Base
                 continue;
             }
             $req_url = home_url($url);
-            $http = wp_remote_head($req_url,array('sslverify'=>false,'redirect_count'=>1,'timeout'=>2));
+            $http = wp_remote_head($req_url,array('sslverify'=>self::sslverify(),'redirect_count'=>1,'timeout'=>2));
             if(is_wp_error($http)){
                 $chk_ret['desc'] = '检测失败,'. $http->get_error_message();
                 $result[] = $chk_ret;
@@ -581,23 +585,34 @@ class WB_BSL_Stats extends WB_BSL_Base
         return $result;
     }
 
+    public static function spider_tables_ready()
+    {
+        $db = self::db();
+        $log = $db->get_var($db->prepare('SHOW TABLES LIKE %s', $db->esc_like($db->prefix . 'wb_spider_log')));
+        return !empty($log);
+    }
+
     public static function spider_404($num=10,$offset=0)
     {
 
         //global $wpdb;
-        $limit = '';
-        if($num>0){
-            $limit = ' LIMIT '.$offset.','.$num;
+        $offset = absint($offset);
+        $num = absint($num);
+        if (!self::spider_tables_ready()) {
+            return array('list' => array(), 'total' => 0);
         }
         $db = self::db();
-        $ipt = $db->prefix.'wb_spider_ip';
-        $query = "SELECT SQL_CALC_FOUND_ROWS MAX(id) id,MAX(visit_date) visit_date, url,`code`,url_md5 
-                    FROM `{$db->prefix}wb_spider_log` a WHERE `code`=404 AND spider=%s 
-                        AND NOT EXISTS(SELECT id FROM `{$db->prefix}wb_spider_ip` b WHERE b.status = 2 and b.name = 'Baiduspider' 
-                                AND b.name=a.spider and b.ip=a.visit_ip  ) GROUP by url_md5 ORDER BY visit_date DESC $limit";
-
-        $list = $db->get_results($db->prepare($query, 'Baiduspider'));
-        $total = $db->get_var("SELECT FOUND_ROWS()");
+        $where = "`code`=404 AND spider=%s AND NOT EXISTS(SELECT id FROM `{$db->prefix}wb_spider_ip` b WHERE b.status = 2 and b.name = 'Baiduspider' AND b.name=a.spider and b.ip=a.visit_ip)";
+        $from = "`{$db->prefix}wb_spider_log` a";
+        $count_sql = "SELECT COUNT(DISTINCT url_md5) FROM {$from} WHERE {$where}";
+        $sql = "SELECT MAX(id) id,MAX(visit_date) visit_date, url,`code`,url_md5 FROM {$from} WHERE {$where} GROUP by url_md5 ORDER BY visit_date DESC";
+        if ($num > 0) {
+            $sql .= ' LIMIT %d,%d';
+            $list = $db->get_results($db->prepare($sql, 'Baiduspider', $offset, $num));
+        } else {
+            $list = $db->get_results($db->prepare($sql, 'Baiduspider'));
+        }
+        $total = (int) $db->get_var($db->prepare($count_sql, 'Baiduspider'));
         return ['list'=>$list,'total'=>$total];
     }
 

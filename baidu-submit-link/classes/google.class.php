@@ -213,9 +213,10 @@ class WB_BSL_Google extends WB_BSL_Base
             return $cache['access_token'];
         }while(0);
 
+        // Fix: Enable SSL verification and increase timeout
         $param = [
-            'timeout'=>5,
-            'sslverify'=>false,
+            'timeout' => 30,
+            'sslverify' => true,
             'body'=>[
                 'grant_type'=>'urn:ietf:params:oauth:grant-type:jwt-bearer',
                 'assertion' => $this->assertion(),
@@ -274,9 +275,10 @@ class WB_BSL_Google extends WB_BSL_Base
         //$api_host = 'indexing.googleapis.com';
         $api_host = 'indexing.googleapis.picpapa.com';
         $api = 'https://'.$api_host.'/v3/urlNotifications:publish';
+        // Fix: Enable SSL verification and increase timeout
         $param = [
-            'timeout'=>5,
-            'sslverify'=>false,
+            'timeout' => 30,
+            'sslverify' => true,
             'headers' =>[
                 'content-type' => 'application/json',
                 'authorization' => 'Bearer '.$token,

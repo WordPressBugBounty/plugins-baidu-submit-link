@@ -40,7 +40,8 @@ class WB_BSL_Yandex extends WB_BSL_Base
         }
         $cnf = WB_BSL_Conf::cnf(null);
         $data = [
-            'sslverify'=>false,
+            'sslverify' => true,
+            'timeout' => 30,
             'timeout'=>10,
         ];
         $data['body'] = [
@@ -115,7 +116,8 @@ class WB_BSL_Yandex extends WB_BSL_Base
                 'Content-Type'  => 'application/json',
             ],
             'timeout' => 10,
-            'sslverify' => false,
+            'sslverify' => true,
+            'timeout' => 30,
         ];
 
         $http    = wp_remote_get( 'https://api.webmaster.yandex.net/v4/user/', $param );
@@ -156,7 +158,8 @@ class WB_BSL_Yandex extends WB_BSL_Base
                 'Content-Type'  => 'application/json',
             ],
             'timeout' => 10,
-            'sslverify' => false,
+            'sslverify' => true,
+            'timeout' => 30,
         ];
 
         $http    = wp_remote_get( sprintf( 'https://api.webmaster.yandex.net/v4/user/%d/hosts', $user_id ), $param );
@@ -262,8 +265,9 @@ class WB_BSL_Yandex extends WB_BSL_Base
             $api_url = sprintf( 'https://api.webmaster.yandex.net/v4/user/%s/hosts/%s/recrawl/queue', $token['user_id'], $host_id );
 
             $param = array(
-                'sslverify' => false,
-                'timeout' => 10,
+                // Fix: Enable SSL verification and increase timeout
+            'sslverify' => true,
+                'timeout' => 30,
                 'headers' => array(
                     'Authorization' => 'OAuth ' . $token['access_token'],
                     'Content-Type'  => 'application/json',

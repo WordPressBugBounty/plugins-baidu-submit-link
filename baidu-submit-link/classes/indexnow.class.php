@@ -120,9 +120,10 @@ class WB_BSL_Inexnow extends WB_BSL_Base
 
     public static function push($key,$api,$post_url)
     {
+        // Fix: Enable SSL verification and increase timeout
         $args = array(
-            'timeout' => 5,
-            'sslverify' => false,
+            'timeout' => 30,
+            'sslverify' => true,
             'body'    => wp_json_encode(
                 array(
                     'host'    => wp_parse_url( get_home_url(), PHP_URL_HOST ),

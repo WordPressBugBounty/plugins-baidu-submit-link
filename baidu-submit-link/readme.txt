@@ -3,10 +3,10 @@ Contributors: wbolt,mrkwong
 Donate link: https://www.wbolt.com/
 Tags: Baidu, SEO, Bing, toutiao, Google, IndexNow, Yandex, 360
 Requires at least: 6.0
-Tested up to: 6.5
-Stable tag: 4.2.11
+Tested up to: 7.1
+Stable tag: 4.4.0
 License: GNU General Public License v3.0 or later
-Requires PHP: 7.0
+Requires PHP: 7.4
 
 多合一搜索自动推送管理插件（原百度搜索推送管理插件）是一款针对WP开发的功能非常强大的百度、Google、Bing、IndexNow、Yandex和头条搜索引擎链接推送插件。协助站长将网站资源快速推送至各大搜索引擎，有利于提升网站的搜索引擎收录效率；该插件还提供文章百度收录查询功能。
 
@@ -262,6 +262,26 @@ WordPress站长可以利用该插件，并结合<a href='https://www.wbolt.com/p
 7. 版本功能对比截图.
 
 == Changelog ==
+
+= 4.4.0 =
+* 兼容 WordPress 6.0–7.1 与 PHP 7.4–8.5；插件头补齐 Requires / Tested up to / Text Domain；
+* 后台升级至 Vue 3.5 + Vite 6 + Element Plus，产物仍输出至 tpl/assets/；
+* 免费档推荐区改为仪表盘三等分模块（主题推荐 / 插件推荐 / WP教程），标题左对齐可换行、日期右对齐，每卡页脚均为学院 | 工具 | 博客；模块位于各标签页内部底部，与保存栏同属当前标签内容区；
+* 修复插件助手页（#/extension）因缺少 .wbolt-products 标签样式导致的排版丢失，并恢复页头/图标所需图片资源；
+* 安全：文章 metabox 增加 nonce / 权限 / autosave 保护；死链 txt/csv 下载改为仅管理员 + nonce；残留 sslverify=false 改为默认校验（可用 bsl_sslverify 覆盖）；chk_ver / 扩展版本失败回 JSON 且不回显远程 HTML；
+* 性能：定时任务改为激活时调度 + 后台自愈，不再每次前台请求检查 cron；
+* 新增 uninstall.php（卸载时清理 option / 自建表 / 定时任务）；PHPCS 仅开启 Security/DB/I18n 基线；
+* 清理后台页面遗留的调试 console.log，避免控制台刷屏。
+
+= 4.3.0 =
+* 安全修复：修复SQL注入漏洞，使用 $wpdb->prepare() 防止SQL注入；
+* 安全修复：增强输入验证，param() 方法根据默认值类型自动净化输入；
+* 安全修复：添加Nonce验证（CSRF防护），兼容两种字段名；
+* 安全修复：启用所有外部API请求的SSL验证，防止中间人攻击；
+* 安全修复：增加外部API请求超时设置（30秒），避免无限等待；
+* 安全修复：替换 exit() 为 wp_die()，提供更友好的错误页面；
+* 代码质量：优化AJAX action注册，移除重复注册；
+* 文档：更新版本号至 4.3.0。
 
 = 4.2.11 =
 * 修复定时发布文章推送异常bug；

@@ -76,7 +76,8 @@ class WB_BSL_Bing extends WB_BSL_Base
             $type_name = '批量提交';
         }
         $ret = array('code'=>1,'desc'=>'fail');
-        $http = wp_remote_post($api,array('sslverify'=>false,'headers'=>array('Content-Type'=>'text/json; charset=utf-8'),'body'=>$body));
+        $http = wp_remote_post($api,array('sslverify' => true,
+            'timeout' => 30,'headers'=>array('Content-Type'=>'text/json; charset=utf-8'),'body'=>$body));
         if(is_wp_error($http)){
             $ret['desc'] = $type_name."请求出错，".$http->get_error_message();
             self::error($ret['desc'],'Bing推送');
@@ -299,7 +300,8 @@ class WB_BSL_Bing extends WB_BSL_Base
         }
         $api = 'https://ssl.bing.com/webmaster/api.svc/json/GetUrlSubmissionQuota?siteUrl=%s&apikey=%s';
         $api = sprintf($api,home_url(),$key);
-        $http = wp_remote_get($api,array('sslverify'=>false));
+        $http = wp_remote_get($api,array('sslverify' => true,
+            'timeout' => 30));
         if(is_wp_error($http)){
             if(is_array($ret)){
                 $ret['desc'] = 'error['.$http->get_error_message().']';
@@ -366,8 +368,10 @@ class WB_BSL_Bing extends WB_BSL_Base
         }
         $api = 'https://ssl.bing.com/webmaster/api.svc/json/GetCrawlStats?siteUrl=%s&apikey=%s';
         $api = sprintf($api,home_url(),$key);
+        // ✅ 增强安全性：启用SSL验证和超时设置
         $param = array(
-            'sslverify' => false,
+            'sslverify' => true,
+            'timeout' => 30,
             'headers' => [
                 'Content-Type'=>'application/json; charset=utf-8',
                 ],

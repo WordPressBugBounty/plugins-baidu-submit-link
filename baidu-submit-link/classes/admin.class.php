@@ -27,6 +27,8 @@ class BSL_Admin extends WB_BSL_Base
 
         self::init_admin();
 
+        add_action('admin_init', array(__CLASS__, 'maybe_schedule_cron'));
+
         add_action('bsl_check_all_404_url', [__CLASS__, 'bsl_check_all_404_url'], 10, 3);
 
 
@@ -65,7 +67,8 @@ class BSL_Admin extends WB_BSL_Base
         //add_filter('post_row_actions',array(__CLASS__,'post_row_actions'),99,2);
         add_action('restrict_manage_posts', array(__CLASS__, 'restrict_manage_posts'), 10, 2);
 
-        add_action('wp_ajax_wb_baidu_push_url', array(__CLASS__, 'wp_ajax_save_data'));
+        // ✅ 修复：移除重复的AJAX action注册（只保留一个处理器）
+        // add_action('wp_ajax_wb_baidu_push_url', array(__CLASS__, 'wp_ajax_save_data')); // 已移除 - 重复注册
         add_action('wp_ajax_wb_baidu_push_url', array(__CLASS__, 'wp_ajax_wb_baidu_push_url'));
 
         add_action('add_meta_boxes', array(__CLASS__, 'add_meta_box'));
@@ -128,56 +131,63 @@ class BSL_Admin extends WB_BSL_Base
 
     public static function parse_request()
     {
-        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
-        if (preg_match('#^/404-list(-(\d+))*.txt#', $uri, $match)) {
-            $page = isset($match[2]) ? $match[2] : 1;
-            $num = 1000;
-            $offset = max(0, ($page - 1)) * $num;
-            $data = WB_BSL_Stats::spider_404($num, $offset);
-            $list = $data['list'];
-            //$url = array();
-            if ($list) foreach ($list as $r) {
-                echo esc_url(home_url($r->url)) . "\n";
-            }
-            exit();
-        } else if (preg_match('#^/404-list\.csv#', $uri, $match)) {
-            set_time_limit(0);
-            ini_set('memory_limit', '500M');
-            $filename = '404-list.csv';
-            header('Content-Type: application/application/octet-stream	');
-            header('Content-Disposition: attachment;filename="' . $filename . '"');
-            header('Cache-Control: max-age=0');
-            header('Cache-Control: max-age=1');
-            header('Expires: Mon, 26 Jul 1997 05:00:00 GMT'); // Date in the past
-            header('Last-Modified: ' . current_time('D, d M Y H:i:s',1) . ' GMT'); // always modified
-            header('Cache-Control: cache, must-revalidate'); // HTTP/1.1
-            header('Pragma: public'); // HTTP/1.0
-            $fileHandle = fopen('php://output', 'wb+');
-            $page = -1;
-            $num = 1000;
-            fwrite($fileHandle, sprintf('"%s"', "URL") . "\n");
-            $db = self::db();
-            do {
-                $page++;
-                $offset = $num * $page;
-                $sql = "SELECT SQL_CALC_FOUND_ROWS MAX(id) id,MAX(visit_date) visit_date, url,`code`,url_md5 
-                    FROM `{$db->prefix}wb_spider_log` a WHERE `code`=404 AND spider='Baiduspider' 
-                        AND NOT EXISTS(SELECT id FROM `{$db->prefix}wb_spider_ip` b WHERE b.status = 2 and b.name = 'Baiduspider' 
-                                AND b.name=a.spider and b.ip=a.visit_ip  ) 
-                    GROUP by url_md5 ORDER BY visit_date DESC LIMIT %d,%d";
-
-                $list = $db->get_results($db->prepare($sql, $offset, $num));
-                if (!$list) {
-                    break;
-                }
-                foreach ($list as $r) {
-                    fwrite($fileHandle, sprintf('"%s"', home_url($r->url)) . "\n");
-                }
-            } while (1);
-
-            fclose($fileHandle);
-            exit();
+        $uri = isset($_SERVER['REQUEST_URI']) ? wp_parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : '';
+        $uri = is_string($uri) ? $uri : '';
+        $is_txt = (bool) preg_match('#^/404-list(-(\d+))*\.txt$#', $uri, $match);
+        $is_csv = (bool) preg_match('#^/404-list\.csv$#', $uri);
+        if (!$is_txt && !$is_csv) {
+            return;
         }
+
+        if (!is_user_logged_in() || !current_user_can('manage_options')) {
+            wp_die(esc_html__('权限不足', 'baidu-submit-link'), 'Error', array('response' => 403));
+        }
+        $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
+        if (!wp_verify_nonce($nonce, 'bsl_404_export')) {
+            wp_die(esc_html__('安全验证失败，请刷新页面后重试', 'baidu-submit-link'), 'Error', array('response' => 403));
+        }
+
+        if ($is_txt) {
+            $page = isset($match[2]) ? max(1, (int) $match[2]) : 1;
+            $num = 1000;
+            $offset = ($page - 1) * $num;
+            $data = WB_BSL_Stats::spider_404($num, $offset);
+            $list = isset($data['list']) ? $data['list'] : array();
+            nocache_headers();
+            header('Content-Type: text/plain; charset=utf-8');
+            if ($list) {
+                foreach ($list as $r) {
+                    echo esc_url(home_url($r->url)) . "\n";
+                }
+            }
+            exit;
+        }
+
+        nocache_headers();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment;filename="404-list.csv"');
+        $fileHandle = fopen('php://output', 'wb+');
+        fwrite($fileHandle, "\"URL\"\n");
+        $page = -1;
+        $num = 1000;
+        do {
+            $page++;
+            $offset = $num * $page;
+            $data = WB_BSL_Stats::spider_404($num, $offset);
+            $list = isset($data['list']) ? $data['list'] : array();
+            if (!$list) {
+                break;
+            }
+            foreach ($list as $r) {
+                fwrite($fileHandle, sprintf('"%s"', esc_url_raw(home_url($r->url))) . "\n");
+            }
+            if (count($list) < $num) {
+                break;
+            }
+        } while ($page < 200);
+
+        fclose($fileHandle);
+        exit;
     }
 
     public static function add_meta_box()
@@ -205,28 +215,40 @@ class BSL_Admin extends WB_BSL_Base
     {
 
         $meta_val = get_post_meta($post->ID, 'wb_bsl_daily_push', true);
-
-        $html = '<div class="sc-body mt">
+        wp_nonce_field('wb_bsl_daily_push', 'wb_bsl_daily_nonce');
+        ?>
+        <div class="sc-body mt">
         <table class="wbs-form-table">
             <tbody>
             <tr>
                 <td class="info">
                 <input type="hidden" name="wb_bsl_meta" value="1">
                     <label>
-                        <input class="wb-switch" type="checkbox"%s name="wb_bsl_daily_push">
-                        <span class="description mt">不执行快速收录推送</span>
+                        <input class="wb-switch" type="checkbox"<?php echo $meta_val ? ' checked' : ''; ?> name="wb_bsl_daily_push" value="1">
+                        <span class="description mt"><?php echo esc_html__('不执行快速收录推送', 'baidu-submit-link'); ?></span>
                     </label>
                 </td>
             </tr>
             </tbody>
-        </table></div>';
-
-        printf($html, esc_html($meta_val ? ' checked' : ''));
-        //echo $html;
+        </table></div>
+        <?php
     }
 
     public static function save_post_meta($post_id)
     {
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+            return;
+        }
+        if (wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) {
+            return;
+        }
+        if (!current_user_can('edit_post', $post_id)) {
+            return;
+        }
+        $nonce = isset($_POST['wb_bsl_daily_nonce']) ? sanitize_text_field(wp_unslash($_POST['wb_bsl_daily_nonce'])) : '';
+        if (!$nonce || !wp_verify_nonce($nonce, 'wb_bsl_daily_push')) {
+            return;
+        }
         $wb_bsl_meta = self::param('wb_bsl_meta', null);
         if (null !== $wb_bsl_meta) {
             $daily_push = self::param('wb_bsl_daily_push', null);
@@ -277,13 +299,28 @@ class BSL_Admin extends WB_BSL_Base
 
 
     /**
-     * 获取推送数据结果
+     * AJAX请求处理（主入口）
      */
     public static function wp_ajax_wb_baidu_push_url()
     {
-
         if (!current_user_can('manage_options')) {
-            exit();
+            self::ajax_resp(array('code' => 1, 'desc' => '权限不足', 'o' => '', 'data' => '403'));
+            return;
+        }
+
+        $nonce = '';
+        if (isset($_POST['_ajax_nonce'])) {
+            $nonce = sanitize_text_field(wp_unslash($_POST['_ajax_nonce']));
+        } elseif (isset($_POST['_wb_bsl_ajax_nonce'])) {
+            $nonce = sanitize_text_field(wp_unslash($_POST['_wb_bsl_ajax_nonce']));
+        } elseif (isset($_GET['_ajax_nonce'])) {
+            $nonce = sanitize_text_field(wp_unslash($_GET['_ajax_nonce']));
+        } elseif (isset($_GET['_wb_bsl_ajax_nonce'])) {
+            $nonce = sanitize_text_field(wp_unslash($_GET['_wb_bsl_ajax_nonce']));
+        }
+        if (empty($nonce) || !wp_verify_nonce($nonce, 'wp_ajax_wb_baidu_push_url')) {
+            self::ajax_resp(array('code' => 1, 'desc' => '安全验证失败，请刷新页面后重试', 'o' => '', 'nonce' => 'fail'));
+            return;
         }
 
         $op = self::param('op');
@@ -366,24 +403,25 @@ class BSL_Admin extends WB_BSL_Base
                     }
                     $post_types = WB_BSL_Conf::cnf('post_type', array('post'));
                     if (empty($post_types)) $post_types = array('post');
-
-                    if (!isset($conf['paged'])) {
-                        $conf['paged'] = 1;
+                    
+                    // ✅ 验证post_types都是合法的post type
+                    $allowed_post_types = get_post_types(array('public' => true));
+                    foreach ($post_types as $key => $post_type) {
+                        if (!in_array($post_type, $allowed_post_types, true)) {
+                            unset($post_types[$key]);
+                        }
                     }
-                    //$conf['paged'] += 1;
-
-                    $db = self::db();
-
-                    $offset = (max(1, $conf['paged']) - 1) * $num;
-
-                    $post_types = "'" . implode("','", $post_types) . "'";
+                    if (empty($post_types)) $post_types = array('post');
+                    
+                    // ✅ 使用占位符构建SQL，防止SQL注入
+                    $placeholders = implode(', ', array_fill(0, count($post_types), '%s'));
                     $date = gmdate('Y-m-d H:i:s', $conf['time']);
-                    $sql = "SELECT SQL_CALC_FOUND_ROWS * FROM $db->posts 
-                                WHERE post_status='publish' AND post_type IN($post_types) AND post_date>'$date'
-                                ORDER BY post_date ASC LIMIT %d, %d";
-
-                    $list = $db->get_results($db->prepare($sql,$offset,$num));
-                    $total = $db->get_var("SELECT FOUND_ROWS()");
+                    $where = "post_status='publish' AND post_type IN($placeholders) AND post_date>%s";
+                    $sql = "SELECT * FROM {$db->posts} WHERE {$where} ORDER BY post_date ASC LIMIT %d, %d";
+                    $count_sql = "SELECT COUNT(*) FROM {$db->posts} WHERE {$where}";
+                    $params = array_merge($post_types, array($date));
+                    $list = $db->get_results($db->prepare($sql, array_merge($params, array($offset, $num))));
+                    $total = (int) $db->get_var($db->prepare($count_sql, $params));
                     $conf['total'] = $total;
                     if (empty($list)) {
                         $conf['time'] = current_time('U');
@@ -404,13 +442,18 @@ class BSL_Admin extends WB_BSL_Base
                 break;
 
             case 'chk_ver':
-                $http = wp_remote_get('https://www.wbolt.com/wb-api/v1/themes/checkver?code=bsl-pro&ver=' . BSL_VERSION . '&chk=1', array('sslverify' => false, 'headers' => array('referer' => home_url()),));
-
-                if (wp_remote_retrieve_response_code($http) == 200) {
-                    echo esc_html(wp_remote_retrieve_body($http));
+                $http = wp_remote_get(
+                    'https://www.wbolt.com/wb-api/v1/themes/checkver?code=bsl-pro&ver=' . BSL_VERSION . '&chk=1',
+                    array('sslverify' => self::sslverify(), 'timeout' => 15, 'headers' => array('referer' => home_url()))
+                );
+                $json = array('code' => '1');
+                if (!is_wp_error($http) && wp_remote_retrieve_response_code($http) == 200) {
+                    $body = json_decode(wp_remote_retrieve_body($http), true);
+                    if (is_array($body)) {
+                        $json = $body;
+                    }
                 }
-
-                exit();
+                self::ajax_resp($json);
                 break;
             case 'promote':
 
@@ -452,7 +495,7 @@ class BSL_Admin extends WB_BSL_Base
 
                     $update_cache = true;
                     $param = ['c' => 'bsl', 'h' => $_SERVER['HTTP_HOST']];
-                    $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/promote', array('sslverify' => false, 'body' => $param, 'headers' => array('referer' => home_url()),));
+                    $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/promote', array('sslverify' => self::sslverify(), 'timeout' => 15, 'body' => $param, 'headers' => array('referer' => home_url()),));
 
                     if (is_wp_error($http)) {
                         $ret['error'] = $http->get_error_message();
@@ -519,7 +562,7 @@ class BSL_Admin extends WB_BSL_Base
 
                 include BSL_PATH . '/inc/url_spider.php';
 
-                exit();
+                wp_die();
 
                 break;
 
@@ -598,7 +641,7 @@ class BSL_Admin extends WB_BSL_Base
                     fwrite($fileHandle, home_url($r->url) . "\n");
                 }
                 fclose($fileHandle);
-                exit();
+                wp_die();
                 break;
 
 
@@ -921,13 +964,21 @@ class BSL_Admin extends WB_BSL_Base
                 self::ajax_resp($ret);
                 break;
             case 'chk_ver_ce':
-
-                $http = wp_remote_get('https://www.wbolt.com/wb-api/v1/extension/ver?code=bsl-pro&ver=', array('sslverify' => false, 'headers' => array('referer' => home_url()),));
-                if (wp_remote_retrieve_response_code($http) == 200) {
-                    echo esc_html(wp_remote_retrieve_body($http));
+                $http = wp_remote_get(
+                    'https://www.wbolt.com/wb-api/v1/extension/ver?code=bsl-pro&ver=',
+                    array('sslverify' => self::sslverify(), 'timeout' => 15, 'headers' => array('referer' => home_url()))
+                );
+                $json = array('code' => '1', 'data' => '');
+                if (!is_wp_error($http) && wp_remote_retrieve_response_code($http) == 200) {
+                    $raw = wp_remote_retrieve_body($http);
+                    $body = json_decode($raw, true);
+                    if (is_array($body)) {
+                        $json = $body;
+                    } elseif (is_string($raw) && $raw !== '') {
+                        $json['data'] = trim($raw, " \t\n\r\"'");
+                    }
                 }
-
-                exit();
+                self::ajax_resp($json);
                 break;
             case 'get_setting_cnf':
                 $ret = array('code' => 0, 'desc' => 'success');
@@ -1122,7 +1173,7 @@ class BSL_Admin extends WB_BSL_Base
                 $param = array('page' => 0, 'Ym' => current_time('Ym'));
                 update_option('wb_bsl_check_all', $param, false);
 
-                exit();
+                wp_die();
                 break;
             case 'batch_bd':
 
@@ -1139,7 +1190,7 @@ class BSL_Admin extends WB_BSL_Base
 
                 WB_BSL_Utils::run_log('手动更新', '收录概况');
                 WB_BSL_Cron::baidu_index(1);
-                exit();
+                wp_die();
                 break;
 
             case 'mark':
@@ -1201,7 +1252,7 @@ class BSL_Admin extends WB_BSL_Base
                         $err = '不合法请求，参数无效';
                         break;
                     }
-                    $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/verify', array('sslverify' => false, 'body' => $param, 'headers' => array('referer' => home_url()),));
+                    $http = wp_remote_post('https://www.wbolt.com/wb-api/v1/verify', array('sslverify' => self::sslverify(), 'timeout' => 15, 'body' => $param, 'headers' => array('referer' => home_url()),));
                     if (is_wp_error($http)) {
                         $err = '校验失败，请稍后再试（错误代码001[' . $http->get_error_message() . '])';
                         break;
@@ -1316,25 +1367,14 @@ class BSL_Admin extends WB_BSL_Base
 
     public static function vue_assets()
     {
-        $assets = include __DIR__ . '/plugins_assets.php';
-        if (!$assets || !is_array($assets)) {
-            return;
-        }
-
-        $wp_styles = wp_styles();
-        if (isset($assets['css']) && is_array($assets['css'])) foreach ($assets['css'] as $r) {
-            $wp_styles->add($r['handle'], BSL_URL . $r['src'], $r['dep'], null, $r['args']);
-            $wp_styles->enqueue($r['handle']); //.'?v=1'
-        }
-        if (isset($assets['js']) && is_array($assets['js'])) foreach ($assets['js'] as $r) {
-            if (!$r['src'] && $r['in_line']) {
-                wp_register_script($r['handle'], false, $r['dep'], false, true);
-                wp_enqueue_script($r['handle']);
-                wp_add_inline_script($r['handle'], $r['in_line'], 'after');
-            } else if ($r['src']) {
-                wp_enqueue_script($r['handle'], BSL_URL . $r['src'], $r['dep'], null, true);
-            }
-        }
+        $ver = rawurlencode(BSL_VERSION);
+        echo '<link rel="stylesheet" href="' . esc_url(BSL_URL . 'tpl/vendor/wbs-lab-base.css?ver=' . $ver) . '">' . "\n";
+        echo '<link rel="stylesheet" href="' . esc_url(BSL_URL . 'tpl/vendor/element-plus.css?ver=' . $ver) . '">' . "\n";
+        echo BSL_Vite::vite(
+            'src/main.js',
+            BSL_PATH . '/tpl/assets/',
+            BSL_URL . 'tpl/assets/'
+        );
     }
 
     public static function render_views()
@@ -1605,6 +1645,11 @@ class BSL_Admin extends WB_BSL_Base
         register_setting(WB_BSL_Conf::$optionName, WB_BSL_Conf::$optionName);
     }
 
+    public static function maybe_schedule_cron()
+    {
+        WB_BSL_Cron::ensure_scheduled();
+    }
+
     public static function admin_enqueue_scripts($hook)
     {
         // global $current_user;
@@ -1671,6 +1716,9 @@ class BSL_Admin extends WB_BSL_Base
             'yandex_callback' => esc_url(admin_url('admin.php?page=wb_bsl')),
             'yandex_token' => get_option('bsl_yandex_token', []),
             'yandex_error' => get_option('bsl_yandex_error', ''),
+            'locale' => get_locale(),
+            'export_nonce' => wp_create_nonce('bsl_404_export'),
+            'admin_home' => admin_url(),
         );
         if ($wb_cnf['yandex_token']) {
             $token = $wb_cnf['yandex_token'];
@@ -1871,11 +1919,12 @@ class BSL_Admin extends WB_BSL_Base
 
     public static function plugin_activate()
     {
-
         WB_BSL_Conf::setup_db();
+        WB_BSL_Cron::ensure_scheduled();
     }
     public static function plugin_deactivate()
     {
         wp_clear_scheduled_hook('baidu_push_url_cron_action_v3');
+        wp_clear_scheduled_hook('baidu_push_url_cron_action_v4');
     }
 }
