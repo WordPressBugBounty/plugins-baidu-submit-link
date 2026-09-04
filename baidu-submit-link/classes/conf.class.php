@@ -27,6 +27,7 @@ class WB_BSL_Conf extends WB_BSL_Base
         'pc_active2'=>0,
         'bdauto'=>0,
         'daily_active'=>0,
+        'sitemap_push'=>1,
         //bing
         'bing_key'=>'',
         'bing_auto'=>0,
@@ -46,6 +47,7 @@ class WB_BSL_Conf extends WB_BSL_Base
         //google
         'google'=>0,
         'google_key'=>'',
+        'google_job_only'=>1,
         //indexnow
         'indexnow'=>0,
         'indexnow_key'=>'',
@@ -130,7 +132,14 @@ class WB_BSL_Conf extends WB_BSL_Base
             $_push_cnf['qh_active'] = 1;
         }
 
+        $had_google_job_only = array_key_exists('google_job_only', $_push_cnf);
+        $had_google_on = !empty($_push_cnf['google']);
+
         $_push_cnf = array_merge(self::$default_conf,$_push_cnf);
+
+        if(!$had_google_job_only && $had_google_on){
+            $_push_cnf['google_job_only'] = 0;
+        }
 
         if(empty($_push_cnf['indexnow_key'])){
             $_push_cnf['indexnow_key'] = md5(AUTH_KEY.home_url());
@@ -229,6 +238,9 @@ class WB_BSL_Conf extends WB_BSL_Base
         }else{
             $opt['sm_active'] = 0;
         }
+        if(isset($opt['sitemap_push'])){
+            $opt['sitemap_push'] = ($opt['sitemap_push'] === '1' || $opt['sitemap_push'] === 1 || $opt['sitemap_push'] === true) ? 1 : 0;
+        }
 
         $opt_data = self::cnf(null);
         foreach($opt_data as $k=>$v){
@@ -258,6 +270,10 @@ class WB_BSL_Conf extends WB_BSL_Base
 
     public static function check_post_type($post){
 
+        if(!$post || !is_object($post)){
+            return false;
+        }
+
         if($post->post_status != 'publish'){
             return false;
         }
@@ -274,6 +290,309 @@ class WB_BSL_Conf extends WB_BSL_Base
             return false;
         }
         return true;
+    }
+
+    /**
+     * Unified auto-push gate. Manual force-push may bypass ($manual=true) and must log that.
+     *
+     * @param WP_Post|object $post
+     * @param string         $channel baidu|daily|bing|indexnow|google|yandex
+     * @param bool           $manual
+     * @return bool
+     */
+    public static function should_push($post, $channel = '', $manual = false)
+    {
+        $ok = true;
+
+        if(!$post || !is_object($post)){
+            $ok = false;
+        } elseif(function_exists('wp_is_post_revision') && wp_is_post_revision($post)){
+            $ok = false;
+        } elseif($post->post_status !== 'publish'){
+            $ok = false;
+        } elseif($post->post_password !== ''){
+            $ok = false;
+        } elseif(in_array($post->post_type, array('attachment', 'nav_menu_item', 'revision'), true)){
+            $ok = false;
+        } elseif(!self::check_post_type($post)){
+            $ok = false;
+        } elseif(!$manual){
+            if((string) get_option('blog_public', '1') === '0'){
+                $ok = false;
+            } elseif(self::post_is_noindex($post)){
+                $ok = false;
+            }
+        }
+
+        return (bool) apply_filters('bsl_should_push', $ok, $post, $channel, $manual);
+    }
+
+    public static function post_is_noindex($post)
+    {
+        if(!$post || empty($post->ID)){
+            return false;
+        }
+
+        $yoast = get_post_meta($post->ID, '_yoast_wpseo_meta-robots-noindex', true);
+        if((string) $yoast === '1'){
+            return true;
+        }
+
+        $rank = get_post_meta($post->ID, 'rank_math_robots', true);
+        if(is_array($rank) && in_array('noindex', $rank, true)){
+            return true;
+        }
+        if(is_string($rank) && $rank !== '' && strpos($rank, 'noindex') !== false){
+            return true;
+        }
+
+        if(class_exists('Smart_SEO_Tool_Admin') && method_exists('Smart_SEO_Tool_Admin', 'cnf')){
+            $noindex = Smart_SEO_Tool_Admin::cnf('tdk.noindex');
+            if(is_array($noindex) && !empty($noindex)){
+                $type = 'post';
+                if($post->post_type === 'page'){
+                    $type = 'page';
+                }
+                if(in_array($type, $noindex, true) || in_array($post->post_type, $noindex, true)){
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * URL actually sent to search engines: canonical, same-host, no tracking/AMP/paged/feed.
+     *
+     * @param WP_Post|int $post
+     * @return string empty if rejected
+     */
+    public static function push_url($post)
+    {
+        $url = '';
+        if(function_exists('wp_get_canonical_url')){
+            $url = wp_get_canonical_url($post);
+        }
+        if(!$url){
+            $url = get_permalink($post);
+        }
+        if(!$url){
+            return '';
+        }
+        if(!preg_match('#^https?://#i', $url)){
+            $url = home_url($url);
+        }
+
+        $url = esc_url_raw($url);
+        if(!$url || !preg_match('#^https?://#i', $url)){
+            return '';
+        }
+
+        $parts = wp_parse_url($url);
+        if(empty($parts['host'])){
+            return '';
+        }
+
+        $site_host = wp_parse_url(home_url(), PHP_URL_HOST);
+        $host_ok = (strcasecmp((string) $parts['host'], (string) $site_host) === 0);
+        $host_ok = (bool) apply_filters('bsl_push_url_host_ok', $host_ok, $parts['host'], $site_host, $post);
+        if(!$host_ok){
+            return '';
+        }
+
+        $path = isset($parts['path']) ? $parts['path'] : '/';
+        if(preg_match('#/page/\d+/?$#i', $path) || preg_match('#/(feed|amp)/?$#i', $path)){
+            return '';
+        }
+
+        $query = array();
+        if(!empty($parts['query'])){
+            parse_str($parts['query'], $query);
+        }
+        if(isset($query['amp'])){
+            return '';
+        }
+        foreach(array_keys($query) as $qk){
+            $qk_l = strtolower((string) $qk);
+            if(strpos($qk_l, 'utm_') === 0 || $qk_l === 'fbclid' || $qk_l === 'gclid'){
+                unset($query[$qk]);
+            }
+        }
+
+        $clean = $parts['scheme'] . '://' . $parts['host'];
+        if(!empty($parts['port'])){
+            $clean .= ':' . $parts['port'];
+        }
+        $clean .= $path;
+        if(!empty($query)){
+            $clean .= '?' . http_build_query($query);
+        }
+
+        $filtered = apply_filters('bsl_push_url', $clean, $post);
+        if(!is_string($filtered) || $filtered === ''){
+            return '';
+        }
+        $filtered = esc_url_raw($filtered);
+        return preg_match('#^https?://#i', $filtered) ? $filtered : '';
+    }
+
+    public static function indexnow_covers($engine)
+    {
+        if(!self::cnf('indexnow')){
+            return false;
+        }
+        $types = self::cnf('indexnow_type', array());
+        if(!is_array($types)){
+            return false;
+        }
+        return in_array($engine, $types, true);
+    }
+
+    public static function google_allows_post($post)
+    {
+        if(!self::cnf('google_job_only')){
+            return true;
+        }
+        $types = apply_filters('bsl_google_post_types', array(
+            'job_listing',
+            'job',
+            'jobs',
+            'job_post',
+            'job-listing',
+            'awsm_job_openings',
+        ));
+        if(!is_array($types)){
+            $types = array();
+        }
+        if($post && in_array($post->post_type, $types, true)){
+            return true;
+        }
+        $hay = '';
+        if($post){
+            $hay .= (string) $post->post_title;
+            $hay .= (string) $post->post_content;
+            $hay .= (string) $post->post_excerpt;
+        }
+        if($hay !== '' && (stripos($hay, 'JobPosting') !== false || stripos($hay, 'BroadcastEvent') !== false)){
+            return true;
+        }
+        return false;
+    }
+
+    public static function sst_active()
+    {
+        if(class_exists('Smart_SEO_Tool_Sitemap') || class_exists('Smart_SEO_Tool_Admin')){
+            return true;
+        }
+        if(function_exists('is_plugin_active')){
+            return is_plugin_active('smart-seo-tool/index.php');
+        }
+        return file_exists(WP_PLUGIN_DIR . '/smart-seo-tool/index.php') && defined('WB_SST_TD');
+    }
+
+    /**
+     * @return array
+     */
+    public static function detect_sitemap()
+    {
+        $ret = array('url' => '', 'source' => '', 'sst' => 0);
+
+        $filtered = apply_filters('bsl_sitemap_url', '');
+        if(is_string($filtered) && $filtered !== ''){
+            $ret['url'] = esc_url_raw($filtered);
+            $ret['source'] = 'filter';
+            return $ret;
+        }
+
+        if(self::sst_active()){
+            $sst_on = true;
+            if(class_exists('Smart_SEO_Tool_Admin') && method_exists('Smart_SEO_Tool_Admin', 'cnf')){
+                $sst_on = (bool) Smart_SEO_Tool_Admin::cnf('sitemap_seo.active');
+            }
+            if($sst_on){
+                $ret['url'] = home_url('/sitemap.xml');
+                $ret['source'] = 'sst';
+                $ret['sst'] = 1;
+                return $ret;
+            }
+        }
+
+        $candidates = array(
+            home_url('/sitemap.xml'),
+            home_url('/sitemaps.xml'),
+            home_url('/sitemap_index.xml'),
+            home_url('/wp-sitemap.xml'),
+        );
+        foreach($candidates as $site_map){
+            $http = wp_remote_head($site_map, array(
+                'timeout' => 8,
+                'sslverify' => self::sslverify(),
+                'redirection' => 2,
+            ));
+            if(wp_remote_retrieve_response_code($http) === 200){
+                $ret['url'] = $site_map;
+                $ret['source'] = 'head';
+                return $ret;
+            }
+        }
+
+        return $ret;
+    }
+
+    public static function translate_push_result($raw)
+    {
+        if($raw === null || $raw === ''){
+            return '';
+        }
+        $text = is_string($raw) ? $raw : wp_json_encode($raw);
+        $decoded = json_decode($text, true);
+        if(is_array($decoded)){
+            if(isset($decoded['message']) && is_string($decoded['message'])){
+                $text = $decoded['message'];
+            } elseif(isset($decoded['Message']) && is_string($decoded['Message'])){
+                $text = $decoded['Message'];
+            } elseif(isset($decoded['error']['message']) && is_string($decoded['error']['message'])){
+                $text = $decoded['error']['message'];
+            }
+        }
+
+        $map = array(
+            'site error' => '站点未在站长平台验证',
+            'empty content' => '未提交任何 URL',
+            'only 2000 urls are allowed once' => '每次最多只能提交 2000 条链接',
+            'over quota' => '超过每日配额，超配额后再提交无效',
+            'token is not valid' => 'Token 错误',
+            'not found' => '接口地址填写错误',
+            'internal error, please try later' => '服务器偶然异常，通常重试就会成功',
+            'URL received. IndexNow key validation pending.' => '已收到 URL，正在校验 IndexNow 密钥',
+            'Invalid format' => 'IndexNow 请求格式无效',
+            'In case of key not valid' => 'IndexNow 密钥无效（未找到密钥文件，或文件内容不匹配）',
+            'In case of URLs which' => 'URL 不属于本站主机，或密钥与协议不一致',
+            'Too Many Requests' => '请求过于频繁，被当作潜在垃圾提交',
+            'Insufficient tokens for quota' => '已超出 Google Indexing API 配额',
+            'Permission denied. Failed to verify the URL ownership.' => '未完成网址所有权验证，或正在更新不属于自己的网址',
+            'Invalid attribute. \'url\' is not in standard URL format' => '提交的网址格式无效',
+            'Missing attribute. \'url\' attribute is required.' => '请求未包含网址',
+        );
+
+        if(isset($map[$text])){
+            return $map[$text];
+        }
+        $keys = array_keys($map);
+        usort($keys, function ($a, $b) {
+            return strlen($b) - strlen($a);
+        });
+        foreach($keys as $en){
+            if(strlen($en) < 12){
+                continue;
+            }
+            if(stripos($text, $en) !== false){
+                return $map[$en];
+            }
+        }
+
+        return $text;
     }
 
 

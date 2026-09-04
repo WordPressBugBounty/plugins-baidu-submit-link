@@ -458,7 +458,11 @@ class WB_BSL_Bing extends WB_BSL_Base
                 break;
             }
 
-            if(!WB_BSL_Conf::check_post_type($post)){
+            if(!WB_BSL_Conf::should_push($post, 'bing')){
+                return;
+            }
+            if(WB_BSL_Conf::indexnow_covers('bing')){
+                self::info('IndexNow 已覆盖 Bing，跳过 Bing Webmaster API 自动推送','收录推送');
                 return;
             }
 
@@ -486,9 +490,10 @@ class WB_BSL_Bing extends WB_BSL_Base
             }
 
 
-            $post_url = get_permalink($post);
-            if(!preg_match('#^https?://#',$post_url)){
-                $post_url = home_url($post_url);
+            $post_url = WB_BSL_Conf::push_url($post);
+            if(!$post_url){
+                self::info('Bing推送跳过：无有效规范 URL','收录推送');
+                break;
             }
 
             self::info('Bing推送，推送url：','收录推送');

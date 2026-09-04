@@ -38,7 +38,11 @@ class WB_BSL_Google extends WB_BSL_Base
                 break;
             }
             $post = get_post($post_id);
-            if($post->post_status != 'publish'){
+            if(!$post || $post->post_status != 'publish'){
+                break;
+            }
+            if(!WB_BSL_Conf::google_allows_post($post)){
+                self::info('Google删除跳过：不在招聘/直播范围内','收录推送');
                 break;
             }
 
@@ -49,9 +53,10 @@ class WB_BSL_Google extends WB_BSL_Base
                 break;
             }
 
-            $post_url = get_permalink($post_id);
-            if(!preg_match('#^https?://#',$post_url)){
-                $post_url = home_url($post_url);
+            $post_url = WB_BSL_Conf::push_url($post);
+            if(!$post_url){
+                self::info('Google删除跳过：无有效规范 URL','收录推送');
+                break;
             }
 
             self::info('Google删除推送，推送url：','收录推送');
@@ -88,7 +93,11 @@ class WB_BSL_Google extends WB_BSL_Base
                 break;
             }
 
-            if(!WB_BSL_Conf::check_post_type($post)){
+            if(!WB_BSL_Conf::should_push($post, 'google')){
+                break;
+            }
+            if(!WB_BSL_Conf::google_allows_post($post)){
+                self::info('Google更新跳过：不在招聘/直播范围内','收录推送');
                 break;
             }
 
@@ -100,9 +109,10 @@ class WB_BSL_Google extends WB_BSL_Base
                 break;
             }
 
-            $post_url = get_permalink($post);
-            if(!preg_match('#^https?://#',$post_url)){
-                $post_url = home_url($post_url);
+            $post_url = WB_BSL_Conf::push_url($post);
+            if(!$post_url){
+                self::info('Google更新跳过：无有效规范 URL','收录推送');
+                break;
             }
 
             self::info('Google更新推送，推送url：','收录推送');

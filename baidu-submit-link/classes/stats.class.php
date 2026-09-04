@@ -257,7 +257,7 @@ class WB_BSL_Stats extends WB_BSL_Base
         $where = "`type` IN({$in}) AND create_date BETWEEN %s AND %s";
         $params = array_merge($type_in, array($from, $now));
         $query = $db->prepare(
-            "SELECT id,post_id,create_date AS `date`,`post_url` AS `url`,push_status AS s_push,index_status AS s_record,`type` FROM $t WHERE {$where} ORDER BY id DESC LIMIT %d,%d",
+            "SELECT id,post_id,create_date AS `date`,`post_url` AS `url`,push_status AS s_push,index_status AS s_record,`type`,`result` FROM $t WHERE {$where} ORDER BY id DESC LIMIT %d,%d",
             array_merge($params, array($offset, $num))
         );
         $count_query = $db->prepare("SELECT COUNT(*) FROM $t WHERE {$where}", $params);
@@ -266,6 +266,13 @@ class WB_BSL_Stats extends WB_BSL_Base
 
         $list =  $db->get_results($query);
         $total = (int) $db->get_var($count_query);
+        if ($list) {
+            foreach ($list as $r) {
+                $raw = isset($r->result) ? $r->result : '';
+                $r->result_raw = $raw;
+                $r->result_zh = WB_BSL_Conf::translate_push_result($raw);
+            }
+        }
         //$result = wp_json_encode(array('remain'=>0,'success'=>1));
         //foreach($list as $r){
 

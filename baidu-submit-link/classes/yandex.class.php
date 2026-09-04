@@ -203,7 +203,7 @@ class WB_BSL_Yandex extends WB_BSL_Base
         if(!get_option('wb_bsl_ver',0)){
             return;
         }
-        if(!WB_BSL_Conf::check_post_type($post)){
+        if(!WB_BSL_Conf::should_push($post, 'yandex')){
             return;
         }
 
@@ -212,13 +212,18 @@ class WB_BSL_Yandex extends WB_BSL_Base
             if(!$active){
                 break;
             }
+            if(WB_BSL_Conf::indexnow_covers('yandex')){
+                self::info('IndexNow 已覆盖 Yandex，跳过 Yandex 官方 API 自动推送','收录推送');
+                break;
+            }
             $token = get_option('bsl_yandex_token');
             if(!$token || !is_array($token)){
                 break;
             }
-            $post_url = get_permalink($post);
-            if(!preg_match('#^https?://#',$post_url)){
-                $post_url = home_url($post_url);
+            $post_url = WB_BSL_Conf::push_url($post);
+            if(!$post_url){
+                self::info('Yandex跳过：无有效规范 URL','收录推送');
+                break;
             }
             self::info('Yandex，推送url：','收录推送');
             self::info($post_url,'收录推送');

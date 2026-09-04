@@ -567,57 +567,17 @@ class BSL_Admin extends WB_BSL_Base
                 break;
 
             case 'check_sitemap':
-                $ret = array('code' => 0, 'desc' => 'success');
-
-
-                $site_map_exists = '';
-
-                //print_r($http);
-                $res_code = [];
-                do {
-                    $site_map = home_url('/sitemap.xml');
-                    $http = wp_remote_head($site_map);
-                    $code = wp_remote_retrieve_response_code($http);
-                    $res_code[] = $code;
-                    if ($code === 200) {
-                        $site_map_exists = $site_map;
-                        break;
-                    }
-
-                    $site_map = home_url('/sitemaps.xml');
-                    $http = wp_remote_head($site_map);
-                    $code = wp_remote_retrieve_response_code($http);
-                    $res_code[] = $code;
-                    if ($code === 200) {
-                        $site_map_exists = $site_map;
-                        break;
-                    }
-                    $site_map = home_url('/sitemap_index.xml');
-                    $http = wp_remote_head($site_map);
-                    $code = wp_remote_retrieve_response_code($http);
-                    $res_code[] = $code;
-                    if ($code === 200) {
-                        $site_map_exists = $site_map;
-                        break;
-                    }
-
-                    $site_map = home_url('/wp-sitemap.xml');
-                    $http = wp_remote_head($site_map);
-                    $code = wp_remote_retrieve_response_code($http);
-                    $res_code[] = $code;
-                    if ($code === 200) {
-                        $site_map_exists = $site_map;
-                        break;
-                    }
-                } while (0);
-
-                $ret['res_code'] = $res_code;
-                if (!$site_map_exists) {
+                $ret = array('code' => 0, 'desc' => 'success', 'sst' => 0, 'sst_admin' => '');
+                $info = WB_BSL_Conf::detect_sitemap();
+                $ret['sst'] = !empty($info['sst']) ? 1 : 0;
+                $ret['source'] = isset($info['source']) ? $info['source'] : '';
+                $ret['sst_admin'] = admin_url('admin.php?page=wb_sst#/sitemap');
+                if (empty($info['url'])) {
                     $ret['code'] = 1;
                     $ret['desc'] = '404';
                 } else {
                     $ret['desc'] = '200';
-                    $ret['data'] = $site_map_exists;
+                    $ret['data'] = $info['url'];
                 }
                 self::ajax_resp($ret);
 
@@ -1403,6 +1363,8 @@ class BSL_Admin extends WB_BSL_Base
             'log_day' => array(1 => '24小时', 3 => '3天', 7 => '7天（默认）'),
             'sitemap_exists' => 0,
             'sitemap_url' => '',
+            'sst_active' => WB_BSL_Conf::sst_active() ? 1 : 0,
+            'sst_admin' => admin_url('admin.php?page=wb_sst#/sitemap'),
         );
 
         //post_types

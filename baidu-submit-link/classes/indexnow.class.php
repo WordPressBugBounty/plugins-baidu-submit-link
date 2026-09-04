@@ -46,7 +46,7 @@ class WB_BSL_Inexnow extends WB_BSL_Base
         if(!get_option('wb_bsl_ver',0)){
             return;
         }
-        if(!WB_BSL_Conf::check_post_type($post)){
+        if(!WB_BSL_Conf::should_push($post, 'indexnow')){
             return;
         }
 
@@ -74,9 +74,10 @@ class WB_BSL_Inexnow extends WB_BSL_Base
                 break;
             }
 
-            $post_url = get_permalink($post);
-            if(!preg_match('#^https?://#',$post_url)){
-                $post_url = home_url($post_url);
+            $post_url = WB_BSL_Conf::push_url($post);
+            if(!$post_url){
+                WB_BSL_Utils::run_log('indexnow跳过：无有效规范 URL','收录推送');
+                break;
             }
 
 
@@ -123,11 +124,12 @@ class WB_BSL_Inexnow extends WB_BSL_Base
         // Fix: Enable SSL verification and increase timeout
         $args = array(
             'timeout' => 30,
-            'sslverify' => true,
+            'sslverify' => self::sslverify(),
             'body'    => wp_json_encode(
                 array(
                     'host'    => wp_parse_url( get_home_url(), PHP_URL_HOST ),
                     'key'     => $key,
+                    'keyLocation' => home_url('/'.$key.'.txt'),
                     'urlList' => array($post_url),
                 )
             ),
@@ -155,7 +157,7 @@ class WB_BSL_Inexnow extends WB_BSL_Base
                 422=>'In case of URLs which don’t belong to the host or the key is not matching the schema in the protocol',
                 429=>'Too Many Requests (potential Spam)',
             ];
-            $err = $msg[$status_code] ? $msg[$status_code] : 'api error,response code['.$status_code.']';
+            $err = isset($msg[$status_code]) ? $msg[$status_code] : 'api error,response code['.$status_code.']';
             self::error($err,'Indexnow推送');
             return [1,$err];
         }

@@ -120,7 +120,7 @@ class WB_BSL_Daily extends WB_BSL_Base
                 break;
             }
 
-            if(!WB_BSL_Conf::check_post_type($post)){
+            if(!WB_BSL_Conf::should_push($post, 'daily')){
                 return;
             }
 
@@ -144,9 +144,10 @@ class WB_BSL_Daily extends WB_BSL_Base
                 break;
             }
 
-            $post_url = get_permalink($post);
-            if(!preg_match('#^https?://#',$post_url)){
-                $post_url = home_url($post_url);
+            $post_url = WB_BSL_Conf::push_url($post);
+            if(!$post_url){
+                WB_BSL_Utils::run_log('快速收录跳过：无有效规范 URL','收录推送');
+                break;
             }
             $url = array(
                 $post_url,
