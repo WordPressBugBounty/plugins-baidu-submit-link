@@ -1095,6 +1095,13 @@ class BSL_Admin extends WB_BSL_Base
                     $key = sanitize_text_field(self::param('key'));
                     $key2 = implode('', ['re', 'set']);
                     if ($key2 === $key) {
+                        // Background /active pings used to POST key=reset and wipe
+                        // a valid license on false positives. Ignore silent reset
+                        // unless an explicit force flag is present (no caller now).
+                        $force = sanitize_text_field(self::param('force'));
+                        if ($force !== '1') {
+                            break;
+                        }
                         $w_key = implode('_', ['wb', 'b'.'sl', '']);
                         $u_uid = get_option($w_key . 'ver', 0);
                         if ($u_uid) {

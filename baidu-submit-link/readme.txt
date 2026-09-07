@@ -4,7 +4,7 @@ Donate link: https://www.wbolt.com/
 Tags: Baidu, SEO, Bing, toutiao, Google, IndexNow, Yandex, 360
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 4.5.0
+Stable tag: 4.5.1
 License: GNU General Public License v3.0 or later
 Requires PHP: 7.4
 
@@ -263,6 +263,9 @@ WordPress站长可以利用该插件，并结合<a href='https://www.wbolt.com/p
 
 == Changelog ==
 
+= 4.5.1 =
+* 修复已激活 Pro 后打开推送 API 页会误报「请激活 Pro」。
+
 = 4.5.0 =
 * 统一自动推送闸门：密码文、附件、「劝阻搜索引擎」、Yoast / Rank Math / Smart SEO Tool 对该篇的 noindex 不再自动推送；手动强推仍可执行并记入日志；
 * 推送地址改为规范链接（canonical），去掉 utm / 分页 / AMP，主机必须属于本站；
@@ -271,7 +274,7 @@ WordPress站长可以利用该插件，并结合<a href='https://www.wbolt.com/p
 * Sitemap 检测优先认 Smart SEO Tool，两边交叉提示对齐，本插件不生成地图；
 * 推送日志失败行显示中文原因（百度 over quota、IndexNow 403、Google 配额等），原文放在提示里；
 * 修复推送 API 页「Sitemap地图推送」开关在 Vue 3 下不可点、地址与提示挤成一行的问题；
-* 修复推送日志列表表头与单元格列宽不对齐（table-layout:auto + 百分比 class-name）。
+* 修复推送日志列表表头与单元格列宽不对齐（table-layout:auto + 百分比 class-name）；
 
 = 4.4.0 =
 * 兼容 WordPress 6.0–7.1 与 PHP 7.4–8.5；插件头补齐 Requires / Tested up to / Text Domain；
